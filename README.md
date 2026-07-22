@@ -51,6 +51,8 @@ npm run rotate-key gmarket
 ```bash
 cd /Users/seungsoohan/Projects/GuardNote
 npm install
+cp .env.example .env
+# .env의 ANTHROPIC_API_KEY에 서버용 키 입력
 npm run dev
 ```
 
@@ -66,7 +68,22 @@ npm run server      # API만
 npm run client      # 웹만
 npm run collector   # 예시 자동수집기 실행 (GUARDNOTE_API_KEY 필요)
 npm run anchor -- --all   # 전체 테넌트 head를 외부 타임스탬프로 앵커링(cron용)
+npm run test:ai-live      # 실제 Claude로 AI 4종 통합 점검
 ```
+
+## 개인정보 AI 워크스페이스
+
+Smart Docs의 네 기능은 모두 서버에서 Anthropic Claude를 실제 호출한다. 브라우저에는 Anthropic 키를
+내려주지 않으며, 키는 `ANTHROPIC_API_KEY` 환경변수로만 관리한다.
+
+- **AI 자동답변** — PDF·DOCX·TXT의 문구를 점검 문항과 연결해 답변, 근거 명확성, 문서 근거, 법적 기준을 반환
+- **AI 문서검토** — 문서 유형과 적용 맥락을 반영해 위반·권고·준수, 인용 문구, 개선안을 생성
+- **AI 증적검토** — PDF·DOCX·TXT·PNG·JPG·WEBP 증적과 수탁자 답변의 일치 여부를 판정
+- **AI 문서생성** — 입력한 업무정보를 바탕으로 편집 가능한 문서 초안, 확인 경고, 조항 근거를 생성
+
+파일은 최대 6MB까지 처리한다. 분석 요청은 Anthropic API로 암호화 전송되며 GuardNote 서버나 DB에는
+원문을 저장하지 않는다. 실제 운영 전에는 Anthropic의 보관·재학습·국외 이전 조건과 사내 개인정보
+처리정책을 함께 검토해야 한다.
 
 ## 배포 (단일 포트 모드)
 
@@ -241,7 +258,8 @@ npm run server
 
 ## API
 
-모든 `/api/*` (`/api/health` 제외)는 `Authorization: Bearer <API 키>` 헤더 필요.
+원장·계정용 `/api/*`는 `Authorization: Bearer <API 키>` 헤더가 필요하다. `/api/health`와
+`/api/ai/*`는 별도 엔드포인트이며 AI 경로에는 동일 출처 검사, 파일 크기 제한, 요청 제한이 적용된다.
 `/api/entries`·`/api/export/*`는 공통으로 `from`(YYYY-MM-DD)·`to`·`cat_key`·`actor` 쿼리로 발췌 가능.
 
 테넌트 API (`Authorization: Bearer <gn_live_…>`):
@@ -249,6 +267,11 @@ npm run server
 | 메서드 | 경로 | 설명 |
 |---|---|---|
 | GET  | `/api/health`     | 헬스체크 (인증 불필요) |
+| GET  | `/api/ai/status`  | Claude 서버 설정 상태(키 값은 노출하지 않음) |
+| POST | `/api/ai/auto-answer` | 문서 기반 점검 자동답변 |
+| POST | `/api/ai/document-review` | 개인정보 문서 위반·권고 검토 |
+| POST | `/api/ai/evidence-review` | 답변과 증적자료 일치 검토 |
+| POST | `/api/ai/document-generate` | 개인정보 문서 초안 생성 |
 | GET  | `/api/whoami`     | 토큰이 관리자/테넌트인지 판별 (프론트 화면 분기) |
 | GET  | `/api/entries`    | 원장 조회 — 쿼리 없으면 전체, 있으면 발췌 |
 | GET  | `/api/categories` | 10개 항목 현황·점수·고시 근거·테넌트 정보·플랜·사용량 |

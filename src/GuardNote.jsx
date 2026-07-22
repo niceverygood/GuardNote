@@ -37,6 +37,7 @@ import {
   WandSparkles,
   X,
 } from "lucide-react";
+import { fileToAiDocument, makeTextFile, runAi } from "./ai-client.js";
 
 const cx = (...values) => values.filter(Boolean).join(" ");
 
@@ -83,15 +84,23 @@ const PROJECTS = [
 const INITIAL_HISTORY = [
   { id: 1, type: "문서 검토", title: "개인정보처리 동의서_v4.docx", result: "위반 3 · 권고 4", score: 72, time: "오늘 15:42", status: "검토 완료" },
   { id: 2, type: "증적 검토", title: "리서치온 · 침해사고 대응절차", result: "답변과 불일치", score: 38, time: "오늘 11:08", status: "보완 요청" },
-  { id: 3, type: "자동 답변", title: "마케팅 수신 동의서.docx", result: "22문항 · 정확도 94%", score: 94, time: "어제 18:20", status: "반영 완료" },
+  { id: 3, type: "자동 답변", title: "마케팅 수신 동의서.docx", result: "22문항 · 근거 명확성 94%", score: 94, time: "어제 18:20", status: "반영 완료" },
 ];
 
-const REVIEW_FINDINGS = [
-  { level: "위반", title: "선택 동의를 서비스 이용의 필수조건처럼 표시했습니다.", detail: "마케팅 활용 동의는 필수 수집·이용 동의와 분리하고, 거부해도 핵심 서비스 이용이 가능함을 명시하세요.", law: "개인정보 보호법 제22조 제5항" },
-  { level: "위반", title: "제3자 제공의 보유·이용기간이 불명확합니다.", detail: "‘목적 달성 시까지’ 대신 제공 목적에 맞는 구체적인 기간 또는 산정 기준을 기재하세요.", law: "개인정보 보호법 제17조" },
-  { level: "권고", title: "고유식별정보 처리 근거를 추가 확인해야 합니다.", detail: "주민등록번호는 동의만으로 처리할 수 없습니다. 법령상 구체적인 근거가 있는지 별도로 점검하세요.", law: "개인정보 보호법 제24조의2" },
-  { level: "권고", title: "제3자의 연락 가능한 정보가 누락되었습니다.", detail: "제공받는 자의 명칭과 함께 문의 가능한 연락처 또는 확인 경로를 기재하는 것이 바람직합니다.", law: "표준 개인정보 보호지침" },
-];
+const SAMPLE_CONSENT = `개인정보 수집·이용 동의서
+필수 수집 항목: 이름, 이메일, 연락처
+이용 목적: 회원 가입 및 주문 처리
+보유기간: 회원 탈퇴 시까지
+마케팅 정보 수신 동의는 선택사항이며 동의하지 않아도 기본 서비스를 이용할 수 있습니다.
+제3자 제공받는 자: 분석 파트너사
+제공 목적: 고객 분석
+제공 항목: 이메일
+보유기간: 목적 달성 시까지`;
+
+const SAMPLE_EVIDENCE = `화면 제목: 아이디 찾기
+입력 항목: 이름, 이메일
+버튼: 인증번호 발송
+비고: 침해사고 대응 절차, 담당자 역할, 보고 체계, 정보주체 통지 또는 관계기관 신고 절차는 표시되어 있지 않음.`;
 
 function Logo({ compact = false }) {
   return <div className={cx("brand", compact && "brand--compact")} aria-label="GuardNote">
@@ -191,31 +200,38 @@ function AutoAnswerModal({ onClose, onApply, notify, addHistory }) {
   const [file, setFile] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [results, setResults] = useState(null);
+  const [summary, setSummary] = useState("");
   const fileRef = useRef(null);
-  const resultRows = [
-    { id: 27, answer: "예", confidence: 96, evidence: "‘필수 동의’와 ‘마케팅 선택 동의’를 별도 항목으로 구분" },
-    { id: 29, answer: "예", confidence: 94, evidence: "수집 목적·항목·보유기간을 표 형식으로 명시" },
-    { id: 33, answer: "아니요", confidence: 89, evidence: "제3자 제공받는 자의 연락 가능한 정보가 없음" },
-    { id: 42, answer: "해당 없음", confidence: 92, evidence: "만 14세 미만 아동 대상 서비스가 아님을 명시" },
-  ];
-  const generate = () => {
+  const generate = async () => {
     if (!file) return notify("분석할 동의서 또는 처리방침을 선택해주세요.");
     setProcessing(true);
-    window.setTimeout(() => { setProcessing(false); setResults(resultRows); }, 1100);
+    try {
+      const out = await runAi("auto-answer", {
+        document: await fileToAiDocument(file),
+        questions: QUESTIONS.map(({ id, area, title, law }) => ({ id, area, title, law })),
+      });
+      setResults(out.answers || []);
+      setSummary(out.summary || "문서 근거를 점검 문항과 연결했습니다.");
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setProcessing(false);
+    }
   };
   const apply = () => {
-    onApply(Object.fromEntries(results.map(r => [r.id, r.answer === "예" ? "yes" : r.answer === "아니요" ? "no" : "na"])));
-    addHistory({ type: "자동 답변", title: file.name, result: `${results.length}문항 · 평균 정확도 93%`, score: 93, status: "반영 완료" });
-    notify("AI 답변 4건을 점검표에 반영했습니다.");
+    onApply(Object.fromEntries(results.map(r => [r.id, r.answer])));
+    const average = results.length ? Math.round(results.reduce((sum, row) => sum + Number(row.confidence || 0), 0) / results.length) : 0;
+    addHistory({ type: "자동 답변", title: file.name, result: `${results.length}문항 · 근거 명확성 ${average}%`, score: average, status: "반영 완료" });
+    notify(`AI 답변 ${results.length}건을 점검표에 반영했습니다.`);
     onClose();
   };
   return <div className="modal-backdrop"><section className="modal modal--wide" role="dialog" aria-modal="true" aria-labelledby="auto-title"><button className="modal-close" onClick={onClose} aria-label="AI 자동답변 닫기"><X size={19} /></button>
-    <div className="modal-eyebrow"><WandSparkles size={17} /> AI AUTO ANSWER</div><h2 id="auto-title">문서를 읽고 점검 답변을 채웁니다.</h2><p>동의서나 처리방침에서 근거를 찾아 답변과 정확도를 제안합니다. 적용 전 항목별 근거를 확인할 수 있습니다.</p>
-    {!results && <><div className="upload-card" onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.hwp,.txt" onChange={e => setFile(e.target.files?.[0] || null)} /><span><UploadCloud size={25} /></span><div><b>{file ? file.name : "문서를 끌어놓거나 선택하세요"}</b><p>{file ? `${Math.max(1, Math.round(file.size / 1024))}KB · 분석 준비됨` : "PDF, DOCX, HWP, TXT · 최대 20MB"}</p></div><button type="button">파일 선택</button></div><button className="sample-link" onClick={() => setFile({ name: "[샘플] 개인정보처리동의서.docx", size: 148000 })}><FileText size={15} /> 샘플 동의서 사용</button>
+    <div className="modal-eyebrow"><WandSparkles size={17} /> AI AUTO ANSWER</div><h2 id="auto-title">문서를 읽고 점검 답변을 채웁니다.</h2><p>동의서나 처리방침에서 근거를 찾아 답변과 근거 명확성을 제안합니다. 적용 전 항목별 근거를 확인할 수 있습니다.</p>
+    {!results && <><div className="upload-card" onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept=".pdf,.docx,.txt" onChange={e => setFile(e.target.files?.[0] || null)} /><span><UploadCloud size={25} /></span><div><b>{file ? file.name : "문서를 끌어놓거나 선택하세요"}</b><p>{file ? `${Math.max(1, Math.round(file.size / 1024))}KB · 분석 준비됨` : "PDF, DOCX, TXT · 최대 6MB"}</p></div><button type="button">파일 선택</button></div><button className="sample-link" onClick={() => setFile(makeTextFile("[샘플] 개인정보처리동의서.txt", SAMPLE_CONSENT))}><FileText size={15} /> 샘플 동의서 사용</button>
       <div className="scope-box"><b>이번 분석 범위</b><span><Check size={14} /> 동의의 구분과 표시</span><span><Check size={14} /> 처리 목적·항목·보유기간</span><span><Check size={14} /> 제3자 제공과 국외 이전</span><span><Check size={14} /> 아동·민감정보·고유식별정보</span></div>
       {processing ? <div className="ai-progress"><span className="ai-spinner"><Sparkles size={23} /></span><div><b>문서 근거를 질문과 연결하고 있습니다.</b><p>문서 구조 분석 → 관련 조항 탐색 → 답변 신뢰도 계산</p><Progress value={72} /></div></div> : <div className="modal-actions"><button className="secondary-button" onClick={onClose}>취소</button><button className="primary-button" onClick={generate}><Sparkles size={16} /> AI 답변 생성</button></div>}</>}
-    {results && <><div className="result-summary"><span className="score-badge">93<small>%</small></span><div><b>4개 문항의 답변을 찾았습니다.</b><p>문서에 근거가 부족한 1개 항목은 ‘아니요’로 제안했습니다.</p></div><Pill tone="good">검토 가능</Pill></div><div className="auto-result-table"><div className="auto-head"><span>문항</span><span>AI 답변</span><span>정확도</span><span>문서 근거</span></div>{results.map(row => <div className="auto-row" key={row.id}><span>Q{row.id}</span><b className={row.answer === "아니요" ? "text-bad" : ""}>{row.answer}</b><span>{row.confidence}%</span><p>{row.evidence}</p></div>)}</div><div className="modal-actions"><button className="secondary-button" onClick={() => setResults(null)}>다시 분석</button><button className="primary-button" onClick={apply}><Check size={16} /> 답변 4건 반영</button></div></>}
-    <small className="ai-disclaimer"><AlertCircle size={13} /> AI 결과는 담당자의 최종 검토가 필요하며 법률 자문을 대신하지 않습니다.</small>
+    {results && <><div className="result-summary"><span className="score-badge">{results.length}<small>건</small></span><div><b>{results.length}개 문항의 답변을 생성했습니다.</b><p>{summary}</p></div><Pill tone="good">Claude 분석 완료</Pill></div><div className="auto-result-table"><div className="auto-head"><span>문항</span><span>AI 답변</span><span>근거 명확성</span><span>문서 근거</span></div>{results.map(row => { const label = row.answer === "yes" ? "예" : row.answer === "no" ? "아니요" : "해당 없음"; return <div className="auto-row" key={row.id}><span>Q{row.id}</span><b className={row.answer === "no" ? "text-bad" : ""}>{label}</b><span>{row.confidence}%</span><p>{row.evidence}<small><BookOpenCheck size={12} /> {row.legalBasis}</small></p></div>; })}</div><div className="modal-actions"><button className="secondary-button" onClick={() => setResults(null)}>다시 분석</button><button className="primary-button" onClick={apply}><Check size={16} /> 답변 {results.length}건 반영</button></div></>}
+    <small className="ai-disclaimer"><AlertCircle size={13} /> 문서는 Claude API로 암호화 전송되며 GuardNote 서버에 저장되지 않습니다. 결과는 담당자가 최종 검토하세요.</small>
   </section></div>;
 }
 
@@ -244,8 +260,9 @@ function AuditPage({ answers, setAnswers, notify, addHistory }) {
   </div>;
 }
 
-function EvidenceResultModal({ onClose, onApply }) {
-  return <div className="modal-backdrop"><section className="modal evidence-modal" role="dialog" aria-modal="true" aria-labelledby="evidence-title"><button className="modal-close" onClick={onClose} aria-label="증적 검토 결과 닫기"><X size={19} /></button><div className="modal-eyebrow"><Sparkles size={17} /> AI EVIDENCE REVIEW</div><h2 id="evidence-title">증적자료 검토 결과</h2><div className="evidence-result-top"><Pill tone="bad">AI 불일치</Pill><span>신뢰도 92%</span><small>2026.07.22 18:42</small></div><div className="result-block"><b>판정</b><p>해당 문항의 답변과 제출된 증적자료가 <strong>불일치</strong>합니다.</p></div><div className="result-block"><b>근거</b><p>제출된 자료는 ‘ID 찾기’ 화면으로, 개인정보 유출·침해사고 대응 절차와 직접 관련이 없습니다. 담당자 역할, 보고 체계, 정보주체 통지 및 관계기관 신고 절차를 확인할 수 있는 문서가 필요합니다.</p></div><div className="result-block suggestion"><b>AI 보완 제안</b><p>침해사고 대응 매뉴얼, 비상연락망, 최근 모의훈련 결과 중 하나를 추가 제출하도록 요청하세요.</p></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>닫기</button><button className="primary-button" onClick={onApply}><MessageSquareText size={16} /> 보완 요청 생성</button></div><small className="ai-disclaimer"><AlertCircle size={13} /> 판정 오류가 의심되면 담당자가 결과를 수정하고 재검토할 수 있습니다.</small></section></div>;
+function EvidenceResultModal({ result, onClose, onApply }) {
+  const tone = result.match === "일치" ? "good" : result.match === "불일치" ? "bad" : "warn";
+  return <div className="modal-backdrop"><section className="modal evidence-modal" role="dialog" aria-modal="true" aria-labelledby="evidence-title"><button className="modal-close" onClick={onClose} aria-label="증적 검토 결과 닫기"><X size={19} /></button><div className="modal-eyebrow"><Sparkles size={17} /> AI EVIDENCE REVIEW</div><h2 id="evidence-title">증적자료 검토 결과</h2><div className="evidence-result-top"><Pill tone={tone}>AI {result.match}</Pill><span>근거 명확성 {result.confidence}%</span><small>Claude 실시간 분석</small></div><div className="result-block"><b>판정</b><p>{result.judgment}</p></div><div className="result-block"><b>근거</b><p>{result.basis}</p></div><div className="result-block suggestion"><b>AI 보완 제안</b><ul>{(result.suggestions || []).map(item => <li key={item}>{item}</li>)}</ul></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>닫기</button>{result.match !== "일치" && <button className="primary-button" onClick={onApply}><MessageSquareText size={16} /> 보완 요청 생성</button>}</div><small className="ai-disclaimer"><AlertCircle size={13} /> AI 판정은 담당자가 증적 원본과 함께 최종 확인해야 합니다.</small></section></div>;
 }
 
 function VendorsPage({ vendors, setVendors, notify, addHistory }) {
@@ -253,19 +270,32 @@ function VendorsPage({ vendors, setVendors, notify, addHistory }) {
   const [file, setFile] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [resultOpen, setResultOpen] = useState(false);
+  const [evidenceResult, setEvidenceResult] = useState(null);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
   const fileRef = useRef(null);
   const selected = vendors.find(v => v.id === selectedId) || vendors[0];
-  const analyze = () => {
+  const analyze = async () => {
     if (!file) return notify("검토할 증적자료를 선택해주세요.");
     setProcessing(true);
-    window.setTimeout(() => { setProcessing(false); setResultOpen(true); }, 1100);
+    try {
+      const out = await runAi("evidence-review", {
+        document: await fileToAiDocument(file, { allowImage: true }),
+        question: "개인정보 유출·침해사고에 대비한 대응 절차를 작성하고 있습니까?",
+        declaredAnswer: "예",
+      });
+      setEvidenceResult(out);
+      setResultOpen(true);
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setProcessing(false);
+    }
   };
   const requestFix = () => {
     setResultOpen(false);
     setVendors(rows => rows.map(v => v.id === selected.id ? { ...v, status: "보완 요청", score: Math.min(v.score, 68) } : v));
-    addHistory({ type: "증적 검토", title: `${selected.name} · 침해사고 대응절차`, result: "답변과 불일치", score: 38, status: "보완 요청" });
+    addHistory({ type: "증적 검토", title: `${selected.name} · 침해사고 대응절차`, result: `답변과 ${evidenceResult?.match || "불일치"}`, score: evidenceResult?.confidence || 0, status: "보완 요청" });
     notify(`${selected.name} 담당자에게 AI 근거가 포함된 보완 요청을 만들었습니다.`);
   };
   const addVendor = e => {
@@ -285,10 +315,10 @@ function VendorsPage({ vendors, setVendors, notify, addHistory }) {
       <aside className="vendor-detail panel"><div className="vendor-profile"><span>{selected.name[0]}</span><div><small>SELECTED PROCESSOR</small><h3>{selected.name}</h3><p>{selected.service}</p></div><Pill tone={selected.status === "양호" ? "good" : selected.status.includes("보완") ? "bad" : "warn"}>{selected.status}</Pill></div><div className="vendor-detail-grid"><span><small>점검 점수</small><b>{selected.score || "—"}</b></span><span><small>제출 증적</small><b>{selected.evidence}건</b></span><span><small>교육</small><b>{selected.training}</b></span></div>
         <div className="custom-check"><div><small>CUSTOM CHECKLIST</small><b>필수 점검 20문항</b></div><span>관리적 7</span><span>기술적 7</span><span>생명주기 6</span></div>
         <div className="training-box"><GraduationCap size={20} /><div><b>개인정보 처리업무 교육</b><p>{selected.training === "이수" ? "2026년 정기교육을 이수했습니다." : "아직 교육을 이수하지 않았습니다."}</p></div><button className="secondary-button" onClick={certificate}>{selected.training === "이수" ? "수료증" : "교육 요청"}</button></div>
-        <div className="evidence-work"><div className="section-head"><div><small>AI EVIDENCE MATCH</small><h3>증적자료 일치 검토</h3></div><Pill tone="ai">AI</Pill></div><p className="evidence-question">Q. 개인정보 유출·침해사고에 대비한 대응 절차를 작성하고 있습니까?</p><AnswerButtons value="yes" onChange={() => {}} /><div className="evidence-upload" onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.hwp,.png,.jpg,.jpeg" onChange={e => setFile(e.target.files?.[0] || null)} /><UploadCloud size={20} /><div><b>{file ? file.name : "증적자료 선택"}</b><small>{file ? "AI 검토 준비됨" : "매뉴얼, 화면 캡처, 훈련 결과"}</small></div></div><button className="sample-link" onClick={() => setFile({ name: "ID찾기_화면.png", size: 94000 })}><FileCheck2 size={15} /> 불일치 샘플 증적 사용</button>{processing ? <div className="inline-processing"><span className="ai-spinner"><Sparkles size={19} /></span><div><b>답변과 증적을 대조하고 있습니다.</b><Progress value={68} /></div></div> : <button className="primary-button wide" onClick={analyze}><Sparkles size={16} /> AI 증적 검토</button>}</div>
+        <div className="evidence-work"><div className="section-head"><div><small>AI EVIDENCE MATCH</small><h3>증적자료 일치 검토</h3></div><Pill tone="ai">LIVE AI</Pill></div><p className="evidence-question">Q. 개인정보 유출·침해사고에 대비한 대응 절차를 작성하고 있습니까?</p><AnswerButtons value="yes" onChange={() => {}} /><div className="evidence-upload" onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" onChange={e => setFile(e.target.files?.[0] || null)} /><UploadCloud size={20} /><div><b>{file ? file.name : "증적자료 선택"}</b><small>{file ? "Claude 검토 준비됨" : "PDF, DOCX, TXT, PNG, JPG · 최대 6MB"}</small></div></div><button className="sample-link" onClick={() => setFile(makeTextFile("ID찾기_화면_설명.txt", SAMPLE_EVIDENCE))}><FileCheck2 size={15} /> 불일치 샘플 증적 사용</button>{processing ? <div className="inline-processing"><span className="ai-spinner"><Sparkles size={19} /></span><div><b>Claude가 답변과 증적을 대조하고 있습니다.</b><Progress value={68} /></div></div> : <button className="primary-button wide" onClick={analyze}><Sparkles size={16} /> AI 증적 검토</button>}</div>
       </aside>
     </section>
-    {resultOpen && <EvidenceResultModal onClose={() => setResultOpen(false)} onApply={requestFix} />}
+    {resultOpen && evidenceResult && <EvidenceResultModal result={evidenceResult} onClose={() => setResultOpen(false)} onApply={requestFix} />}
     {adding && <div className="modal-backdrop"><form className="modal modal--small" onSubmit={addVendor}><button type="button" className="modal-close" onClick={() => setAdding(false)} aria-label="수탁자 추가 닫기"><X size={19} /></button><div className="modal-eyebrow"><Users size={17} /> NEW PROCESSOR</div><h2>수탁자 등록</h2><p>회사명과 위탁업무를 등록한 뒤 맞춤 점검표를 보낼 수 있습니다.</p><label className="field"><span>수탁자명</span><input autoFocus value={newName} onChange={e => setNewName(e.target.value)} placeholder="예: 데이터파트너" /></label><label className="field"><span>위탁업무</span><input defaultValue="신규 위탁업무" /></label><button className="primary-button wide" type="submit">등록하고 점검 준비</button></form></div>}
   </div>;
 }
@@ -307,17 +337,32 @@ function DocReview({ notify, addHistory }) {
   const [docType, setDocType] = useState("개인정보 수집·이용 동의서");
   const [file, setFile] = useState(null);
   const [processing, setProcessing] = useState(false);
-  const [result, setResult] = useState(false);
+  const [result, setResult] = useState(null);
   const [context, setContext] = useState([true,false,true,false]);
   const fileRef = useRef(null);
-  const run = () => {
+  const contextLabels = ["만 14세 미만 아동도 이용","민감정보를 수집","마케팅 목적으로 이용","개인정보를 국외 이전"];
+  const run = async () => {
     if (!file) return notify("검토할 개인정보 문서를 선택해주세요.");
     setProcessing(true);
-    window.setTimeout(() => { setProcessing(false); setResult(true); addHistory({ type: "문서 검토", title: file.name, result: "위반 2 · 권고 2", score: 72, status: "검토 완료" }); }, 1200);
+    try {
+      const out = await runAi("document-review", {
+        document: await fileToAiDocument(file),
+        docType,
+        contexts: contextLabels.filter((_, index) => context[index]),
+      });
+      setResult(out);
+      const violations = (out.findings || []).filter(item => item.level === "위반").length;
+      const recommendations = (out.findings || []).filter(item => item.level === "권고").length;
+      addHistory({ type: "문서 검토", title: file.name, result: `위반 ${violations} · 권고 ${recommendations}`, score: out.score || 0, status: "검토 완료" });
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setProcessing(false);
+    }
   };
-  const exportResult = () => { downloadText("AI_문서검토_결과.txt", `문서: ${file?.name}\n유형: ${docType}\n\n${REVIEW_FINDINGS.map((v,i)=>`${i+1}. [${v.level}] ${v.title}\n${v.detail}\n근거: ${v.law}`).join("\n\n")}`); notify("AI 문서검토 결과를 다운로드했습니다."); };
-  if (result) return <section className="doc-result panel"><div className="doc-result-head"><div><Pill tone="ai">AI DOCUMENT REVIEW</Pill><h3>문서 검토 결과</h3><p>{file?.name} · {docType}</p></div><div className="review-score"><strong>72</strong><span>/100</span><small>문서 적정성</small></div><button className="secondary-button" onClick={exportResult}><Download size={15} /> 결과 저장</button></div><div className="finding-summary"><span><b>2</b> 위반</span><span><b>2</b> 권고</span><span><b>11</b> 준수</span></div><div className="finding-list">{REVIEW_FINDINGS.map((finding,i)=><article key={finding.title}><span>{i+1}</span><Pill tone={finding.level === "위반" ? "bad" : "warn"}>{finding.level}</Pill><div><h4>{finding.title}</h4><p>{finding.detail}</p><small><BookOpenCheck size={13} /> {finding.law}</small></div><ChevronDown size={17} /></article>)}</div><div className="doc-result-actions"><button className="secondary-button" onClick={() => setResult(false)}>다른 문서 검토</button><button className="primary-button" onClick={exportResult}><FileOutput size={16} /> 개선안 포함 보고서</button></div></section>;
-  return <section className="doc-review panel"><div className="doc-step"><span>1</span><div><small>DOCUMENT TYPE</small><h3>검토할 문서 유형</h3></div></div><div className="doc-type-grid">{["개인정보 수집·이용 동의서","개인정보 처리방침","내부 관리계획","개인정보 처리 위수탁계약서"].map(v=><button key={v} className={docType===v?"is-active":""} onClick={()=>setDocType(v)}><FileText size={18} />{v}{docType===v&&<Check size={15}/>}</button>)}</div><div className="doc-step"><span>2</span><div><small>UPLOAD</small><h3>문서 첨부</h3></div></div><div className="upload-card" onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.hwp,.txt" onChange={e=>setFile(e.target.files?.[0]||null)}/><span><UploadCloud size={25}/></span><div><b>{file?file.name:"검토할 문서를 선택하세요"}</b><p>{file?"업로드 완료 · 분석 준비됨":"PDF, DOCX, HWP, TXT · 최대 20MB"}</p></div><button type="button">파일 선택</button></div><button className="sample-link" onClick={()=>setFile({name:"[샘플] 개인정보처리동의서_v4.docx",size:184000})}><FileText size={15}/> 샘플 문서 사용</button><div className="doc-step"><span>3</span><div><small>CONTEXT</small><h3>문서 적용 맥락</h3></div></div><div className="context-grid">{["만 14세 미만 아동도 이용","민감정보를 수집","마케팅 목적으로 이용","개인정보를 국외 이전"].map((v,i)=><button key={v} onClick={()=>setContext(rows=>rows.map((x,n)=>n===i?!x:x))} className={context[i]?"is-active":""}><span>{context[i]&&<Check size={14}/>}</span>{v}</button>)}</div>{processing?<div className="ai-progress"><span className="ai-spinner"><Sparkles size={23}/></span><div><b>문서 조항과 최신 기준을 대조하고 있습니다.</b><p>문서 구조 → 필수 고지 → 위반·권고 → 개선안 생성</p><Progress value={76}/></div></div>:<button className="primary-button wide review-run" onClick={run}><Sparkles size={17}/> AI 정확성 검토 시작</button>}<small className="ai-disclaimer"><ShieldCheck size={13}/> 데모 분석은 브라우저 안에서 실행되며 선택한 파일을 외부로 전송하지 않습니다.</small></section>;
+  const exportResult = () => { downloadText("AI_문서검토_결과.txt", `문서: ${file?.name}\n유형: ${docType}\n모델: ${result?.meta?.model || "Claude"}\n\n총평: ${result?.summary || ""}\n\n${(result?.findings || []).map((v,i)=>`${i+1}. [${v.level}] ${v.title}\n${v.detail}\n문서 문구: ${v.excerpt}\n근거: ${v.legalBasis}`).join("\n\n")}`); notify("AI 문서검토 결과를 다운로드했습니다."); };
+  if (result) { const findings = result.findings || []; const violations = findings.filter(v => v.level === "위반").length; const recommendations = findings.filter(v => v.level === "권고").length; return <section className="doc-result panel"><div className="doc-result-head"><div><Pill tone="ai">AI DOCUMENT REVIEW · LIVE</Pill><h3>문서 검토 결과</h3><p>{file?.name} · {docType}</p></div><div className="review-score"><strong>{result.score}</strong><span>/100</span><small>문서 적정성</small></div><button className="secondary-button" onClick={exportResult}><Download size={15} /> 결과 저장</button></div><p className="review-summary-copy">{result.summary}</p><div className="finding-summary"><span><b>{violations}</b> 위반</span><span><b>{recommendations}</b> 권고</span><span><b>{result.compliantCount || 0}</b> 준수</span></div><div className="finding-list">{findings.map((finding,i)=><article key={`${finding.title}-${i}`}><span>{i+1}</span><Pill tone={finding.level === "위반" ? "bad" : "warn"}>{finding.level}</Pill><div><h4>{finding.title}</h4><p>{finding.detail}</p><blockquote>{finding.excerpt}</blockquote><small><BookOpenCheck size={13} /> {finding.legalBasis}</small></div><ChevronDown size={17} /></article>)}</div><div className="doc-result-actions"><button className="secondary-button" onClick={() => setResult(null)}>다른 문서 검토</button><button className="primary-button" onClick={exportResult}><FileOutput size={16} /> 개선안 포함 보고서</button></div></section>; }
+  return <section className="doc-review panel"><div className="doc-step"><span>1</span><div><small>DOCUMENT TYPE</small><h3>검토할 문서 유형</h3></div></div><div className="doc-type-grid">{["개인정보 수집·이용 동의서","개인정보 처리방침","내부 관리계획","개인정보 처리 위수탁계약서"].map(v=><button key={v} className={docType===v?"is-active":""} onClick={()=>setDocType(v)}><FileText size={18} />{v}{docType===v&&<Check size={15}/>}</button>)}</div><div className="doc-step"><span>2</span><div><small>UPLOAD</small><h3>문서 첨부</h3></div></div><div className="upload-card" onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept=".pdf,.docx,.txt" onChange={e=>setFile(e.target.files?.[0]||null)}/><span><UploadCloud size={25}/></span><div><b>{file?file.name:"검토할 문서를 선택하세요"}</b><p>{file?"업로드 완료 · Claude 분석 준비됨":"PDF, DOCX, TXT · 최대 6MB"}</p></div><button type="button">파일 선택</button></div><button className="sample-link" onClick={()=>setFile(makeTextFile("[샘플] 개인정보처리동의서_v4.txt",SAMPLE_CONSENT))}><FileText size={15}/> 샘플 문서 사용</button><div className="doc-step"><span>3</span><div><small>CONTEXT</small><h3>문서 적용 맥락</h3></div></div><div className="context-grid">{contextLabels.map((v,i)=><button key={v} onClick={()=>setContext(rows=>rows.map((x,n)=>n===i?!x:x))} className={context[i]?"is-active":""}><span>{context[i]&&<Check size={14}/>}</span>{v}</button>)}</div>{processing?<div className="ai-progress"><span className="ai-spinner"><Sparkles size={23}/></span><div><b>Claude가 문서 조항과 2025.11 기준을 대조하고 있습니다.</b><p>문서 구조 → 필수 고지 → 위반·권고 → 개선안 생성</p><Progress value={76}/></div></div>:<button className="primary-button wide review-run" onClick={run}><Sparkles size={17}/> AI 정확성 검토 시작</button>}<small className="ai-disclaimer"><ShieldCheck size={13}/> 문서는 Claude API로 암호화 전송되며 GuardNote 서버에 저장되지 않습니다.</small></section>;
 }
 
 function DocGenerator({ notify, addHistory }) {
@@ -325,9 +370,22 @@ function DocGenerator({ notify, addHistory }) {
   const [form, setForm] = useState({ company:"한빛커머스", purpose:"회원 가입, 주문 처리 및 고객 문의 대응", items:"이름, 이메일, 휴대전화번호, 배송지", retention:"회원 탈퇴 후 30일", contact:"privacy@hanbit.example" });
   const [content, setContent] = useState("");
   const [processing, setProcessing] = useState(false);
-  const generate = () => { setProcessing(true); window.setTimeout(()=>{ const draft=`${type}\n\n한빛커머스(이하 “회사”)는 다음과 같이 개인정보를 수집·이용합니다.\n\n1. 수집·이용 목적\n${form.purpose}\n\n2. 수집 항목\n${form.items}\n\n3. 보유 및 이용기간\n${form.retention}\n\n4. 동의를 거부할 권리 및 불이익\n귀하는 개인정보 수집·이용에 대한 동의를 거부할 권리가 있습니다. 다만, 필수정보 수집에 동의하지 않는 경우 회원 가입 및 주문 서비스 이용이 제한될 수 있습니다.\n\n5. 문의처\n개인정보 관련 문의: ${form.contact}\n\n[선택 동의]\n마케팅 정보 수신은 선택사항이며 동의하지 않아도 기본 서비스를 이용할 수 있습니다.`; setContent(draft); setProcessing(false); addHistory({type:"문서 생성",title:`${type} 초안`,result:"필수 조항 9개 자동 구성",score:96,status:"초안 생성"}); },1100); };
+  const [generation, setGeneration] = useState(null);
+  const generate = async () => {
+    setProcessing(true);
+    try {
+      const out = await runAi("document-generate", { type, form });
+      setContent(out.content || "");
+      setGeneration(out);
+      addHistory({type:"문서 생성",title:out.title || `${type} 초안`,result:`조항 근거 ${(out.clauses || []).length}개 구성`,score:Math.max(0, 100 - (out.warnings || []).length * 5),status:"초안 생성"});
+    } catch (error) {
+      notify(error.message);
+    } finally {
+      setProcessing(false);
+    }
+  };
   const save=()=>{downloadText(`GuardNote_${type}_초안.txt`,content);notify("AI 문서 초안을 다운로드했습니다.");};
-  return <section className="generator-layout"><div className="generator-form panel"><Pill tone="ai">AI DOCUMENT GENERATOR · NEW</Pill><h3>관련 정보만 입력하면<br />검토 가능한 초안을 만듭니다.</h3><p>지키다에서 출시 예정인 문서생성 흐름을 입력·생성·검증·편집까지 완성했습니다.</p><label className="field"><span>문서 유형</span><select value={type} onChange={e=>setType(e.target.value)}><option>개인정보 수집·이용 동의서</option><option>개인정보 처리방침</option><option>내부 관리계획</option><option>개인정보 처리 위수탁계약서</option></select></label>{[["company","회사·기관명"],["purpose","처리 목적"],["items","개인정보 항목"],["retention","보유·이용기간"],["contact","개인정보 문의처"]].map(([key,label])=><label className="field" key={key}><span>{label}</span><input value={form[key]} onChange={e=>setForm(prev=>({...prev,[key]:e.target.value}))}/></label>)}{processing?<div className="ai-progress compact"><span className="ai-spinner"><Sparkles size={21}/></span><div><b>필수 조항을 구성하고 있습니다.</b><Progress value={82}/></div></div>:<button className="primary-button wide" onClick={generate}><WandSparkles size={16}/> 안전한 초안 생성</button>}</div><div className="document-editor panel">{!content?<div className="editor-empty"><span><FileOutput size={30}/></span><h3>생성된 문서가 여기에 표시됩니다.</h3><p>필수 고지사항, 동의 거부권, 보유기간 표현을 자동 점검하고 수정 가능한 초안을 제공합니다.</p><div><span><Check size={14}/> 필수조항 자동 구성</span><span><Check size={14}/> 법적 근거 연결</span><span><Check size={14}/> 누락·모호 표현 경고</span></div></div>:<><div className="editor-head"><div><Pill tone="good">초안 검증 완료</Pill><h3>{type} v0.1</h3></div><button className="secondary-button" onClick={save}><Download size={15}/> 다운로드</button></div><div className="validation-strip"><span><CheckCircle2 size={16}/> 필수 항목 9개 확인</span><span><AlertTriangle size={16}/> 담당자 최종 검토 필요</span></div><textarea value={content} onChange={e=>setContent(e.target.value)} aria-label="생성된 문서 초안"/><div className="clause-trace"><b>조항 근거</b><span>동의 구분 · 법 제22조</span><span>보유기간 · 법 제21조</span><span>고지사항 · 법 제15조</span></div></>}</div></section>;
+  return <section className="generator-layout"><div className="generator-form panel"><Pill tone="ai">AI DOCUMENT GENERATOR · LIVE</Pill><h3>관련 정보만 입력하면<br />검토 가능한 초안을 만듭니다.</h3><p>Claude가 입력 정보와 2025.11 안전성 확보조치 기준을 함께 검토해 편집 가능한 초안을 생성합니다.</p><label className="field"><span>문서 유형</span><select value={type} onChange={e=>setType(e.target.value)}><option>개인정보 수집·이용 동의서</option><option>개인정보 처리방침</option><option>내부 관리계획</option><option>개인정보 처리 위수탁계약서</option></select></label>{[["company","회사·기관명"],["purpose","처리 목적"],["items","개인정보 항목"],["retention","보유·이용기간"],["contact","개인정보 문의처"]].map(([key,label])=><label className="field" key={key}><span>{label}</span><input value={form[key]} onChange={e=>setForm(prev=>({...prev,[key]:e.target.value}))}/></label>)}{processing?<div className="ai-progress compact"><span className="ai-spinner"><Sparkles size={21}/></span><div><b>Claude가 필수 조항을 구성하고 있습니다.</b><Progress value={82}/></div></div>:<button className="primary-button wide" onClick={generate}><WandSparkles size={16}/> 안전한 초안 생성</button>}</div><div className="document-editor panel">{!content?<div className="editor-empty"><span><FileOutput size={30}/></span><h3>생성된 문서가 여기에 표시됩니다.</h3><p>필수 고지사항, 동의 거부권, 보유기간 표현을 자동 점검하고 수정 가능한 초안을 제공합니다.</p><div><span><Check size={14}/> 필수조항 자동 구성</span><span><Check size={14}/> 법적 근거 연결</span><span><Check size={14}/> 누락·모호 표현 경고</span></div></div>:<><div className="editor-head"><div><Pill tone="good">Claude 초안 생성 완료</Pill><h3>{generation?.title || type}</h3></div><button className="secondary-button" onClick={save}><Download size={15}/> 다운로드</button></div><div className="validation-strip"><span><CheckCircle2 size={16}/> 조항 근거 {(generation?.clauses || []).length}개 연결</span><span><AlertTriangle size={16}/> 확인 필요 {(generation?.warnings || []).length}건</span></div>{(generation?.warnings || []).length > 0 && <ul className="generation-warnings">{generation.warnings.map(item=><li key={item}>{item}</li>)}</ul>}<textarea value={content} onChange={e=>setContent(e.target.value)} aria-label="생성된 문서 초안"/><div className="clause-trace"><b>조항 근거</b>{(generation?.clauses || []).map(item=><span key={`${item.label}-${item.legalBasis}`}>{item.label} · {item.legalBasis}</span>)}</div></>}</div></section>;
 }
 
 function SmartDocsPage({ notify, addHistory, openAuto, go }) {
@@ -339,7 +397,7 @@ function SmartDocsPage({ notify, addHistory, openAuto, go }) {
     { id:"evidence", icon:FolderCheck, title:"AI 증적 검토", desc:"수탁자의 답변과 증적자료 일치 판정" },
   ];
   const select = id => { if(id === "answer") openAuto(); else if(id === "evidence") go("vendors"); else setTool(id); };
-  return <div className="page smart-page"><section className="smart-hero"><div><Pill tone="ai">SMART DOCS</Pill><h2>읽고, 답하고, 만들고, 검증하는<br /><em>개인정보 AI 워크스페이스</em></h2><p>문서와 점검을 분리하지 않고 하나의 근거 흐름으로 연결합니다.</p></div><div className="smart-trust"><ShieldCheck size={27}/><b>Privacy-first AI</b><span>파일 외부전송 없음</span><span>근거와 신뢰도 표시</span><span>담당자 최종 승인</span></div></section><section className="tool-grid">{tools.map(({id,icon:Icon,title,desc,fresh})=><button key={id} className={cx(tool===id&&"is-active")} onClick={()=>select(id)}><span><Icon size={22}/></span><div><h3>{title}{fresh&&<Pill tone="ai">NEW</Pill>}</h3><p>{desc}</p></div><ChevronRight size={18}/></button>)}</section>{tool === "review" ? <DocReview notify={notify} addHistory={addHistory}/> : <DocGenerator notify={notify} addHistory={addHistory}/>}</div>;
+  return <div className="page smart-page"><section className="smart-hero"><div><Pill tone="ai">SMART DOCS · CLAUDE LIVE</Pill><h2>읽고, 답하고, 만들고, 검증하는<br /><em>개인정보 AI 워크스페이스</em></h2><p>문서와 점검을 분리하지 않고 하나의 근거 흐름으로 연결합니다.</p></div><div className="smart-trust"><ShieldCheck size={27}/><b>Privacy-first AI</b><span>서버 비밀키 보호</span><span>문서 원문 미저장</span><span>담당자 최종 승인</span></div></section><section className="tool-grid">{tools.map(({id,icon:Icon,title,desc,fresh})=><button key={id} className={cx(tool===id&&"is-active")} onClick={()=>select(id)}><span><Icon size={22}/></span><div><h3>{title}{fresh&&<Pill tone="ai">LIVE</Pill>}</h3><p>{desc}</p></div><ChevronRight size={18}/></button>)}</section>{tool === "review" ? <DocReview notify={notify} addHistory={addHistory}/> : <DocGenerator notify={notify} addHistory={addHistory}/>}</div>;
 }
 
 function HistoryPage({ history, notify }) {

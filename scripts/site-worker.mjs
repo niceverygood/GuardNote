@@ -1,19 +1,15 @@
-import { mkdirSync, writeFileSync } from "node:fs";
-
-const worker = `export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    let response = await env.ASSETS.fetch(request);
-
-    if (response.status === 404 && request.method === "GET" && !url.pathname.includes(".")) {
-      const fallback = new URL("/index.html", url);
-      response = await env.ASSETS.fetch(new Request(fallback, request));
-    }
-
-    return response;
-  },
-};
-`;
+import { mkdirSync } from "node:fs";
+import { build } from "esbuild";
 
 mkdirSync("dist/server", { recursive: true });
-writeFileSync("dist/server/index.js", worker, "utf8");
+await build({
+  entryPoints: ["server/site-worker.js"],
+  outfile: "dist/server/index.js",
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: "es2022",
+  minify: false,
+  sourcemap: false,
+  legalComments: "none",
+});

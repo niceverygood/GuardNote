@@ -1,4 +1,5 @@
 // GuardNote API 서버 — Express + SQLite, 멀티테넌시(고객사별 원장 완전 격리)
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import fs from "node:fs";
@@ -33,6 +34,7 @@ import { entriesToCsv } from "./csv-export.js";
 import { buildEvidencePdf } from "./pdf-report.js";
 import { buildBreachDraftPdf } from "./breach-draft.js";
 import { generateBreachDraft, FIELD_SETS as AI_FIELD_SETS } from "./ai-draft.js";
+import { AiServiceError, aiServiceStatus, runAiTask } from "./ai-core.js";
 import { PLANS, PLAN_KEYS, getPlan, planAllows, withinEntryQuota } from "./plans.js";
 import { anchorTenant, anchorStatus } from "./anchor.js";
 import { startMonitor, runMonitorOnce } from "./monitor.js";
@@ -54,7 +56,7 @@ const PORT = process.env.GUARDNOTE_PORT || 8787;
 // 데모/시드 부트스트랩과 /api/_demo/* 는 프로덕션에서 절대 실행되면 안 된다 — 평문 키 파일 생성,
 // 임의 UPDATE 등 로컬 개발 전용 동작이기 때문. 이 하나의 플래그로 둘 다 통제한다.
 const demoEnabled = process.env.NODE_ENV !== "production";
-const ALLOWED_ORIGINS = (process.env.GUARDNOTE_ALLOWED_ORIGIN || "http://localhost:5173")
+const ALLOWED_ORIGINS = (process.env.GUARDNOTE_ALLOWED_ORIGIN || "http://localhost:5173,http://127.0.0.1:5173")
   .split(",").map((s) => s.trim()).filter(Boolean);
 
 // 안전성 확보조치 10개 항목 — 고시(제2025-9호) 제2장 제4조~제13조 순서를 따른다.
@@ -136,12 +138,46 @@ app.use(securityHeaders);
 app.use(accessLog);
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 app.use("/api", apiRateLimit);
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({ limit: "9mb" }));
 
 // 헬스체크는 인증 없이 — 로드밸런서/모니터링용
 app.get("/api/health", (req, res) => res.json({
   ok: true, version: PKG.version, uptimeSec: Math.floor(process.uptime()), genesis: GENESIS,
 }));
+
+// 새 개인정보 AI 워크스페이스. 키는 서버 환경변수로만 읽고 브라우저에는 절대 노출하지 않는다.
+// 로컬 개발과 Sites Worker가 동일한 ai-core를 사용해 결과 구조가 달라지지 않도록 한다.
+const AI_TASK_BY_PATH = {
+  "/auto-answer": "auto-answer",
+  "/document-review": "document-review",
+  "/evidence-review": "evidence-review",
+  "/document-generate": "document-generate",
+};
+const aiConfig = () => ({ apiKey: process.env.ANTHROPIC_API_KEY, model: process.env.ANTHROPIC_MODEL });
+const aiRateWindows = new Map();
+app.use("/api/ai", (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && !ALLOWED_ORIGINS.includes(origin)) return res.status(403).json({ error: "허용되지 않은 출처입니다." });
+  const key = req.ip || "unknown";
+  const now = Date.now();
+  const window = aiRateWindows.get(key);
+  if (!window || now - window.startedAt > 60_000) aiRateWindows.set(key, { startedAt: now, count: 1 });
+  else if (++window.count > 20) return res.status(429).json({ error: "AI 요청이 많습니다. 잠시 후 다시 시도해주세요." });
+  next();
+});
+app.get("/api/ai/status", (req, res) => res.json(aiServiceStatus(aiConfig())));
+for (const [routePath, task] of Object.entries(AI_TASK_BY_PATH)) {
+  app.post(`/api/ai${routePath}`, async (req, res) => {
+    try {
+      res.setHeader("Cache-Control", "no-store");
+      res.json(await runAiTask(task, req.body, aiConfig()));
+    } catch (error) {
+      if (error instanceof AiServiceError) return res.status(error.status).json({ error: error.message, code: error.code });
+      console.error("GuardNote AI API error", error?.message || error);
+      res.status(500).json({ error: "AI 요청을 처리하지 못했습니다." });
+    }
+  });
+}
 
 // 신원 확인 — 세션 쿠키(계정) 또는 Bearer 토큰(관리자/테넌트 키)을 판별해 화면을 분기한다.
 // requireAuth를 타지 않는 경로이므로 브루트포스 카운터를 여기서도 직접 건다.
