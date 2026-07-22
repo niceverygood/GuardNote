@@ -1,0 +1,25 @@
+
+> guardnote@0.2.0 dev
+> concurrently -n server,web -c yellow,cyan "npm:server" "npm:client"
+
+[web] 
+[web] > guardnote@0.2.0 client
+[web] > vite
+[web] 
+[server] 
+[server] > guardnote@0.2.0 server
+[server] > node server/index.js
+[server] 
+[web] 
+[web]   VITE v5.4.21  ready in 163 ms
+[web] 
+[web]   ➜  Local:   http://localhost:5173/
+[web]   ➜  Network: use --host to expose
+[server] 🔑 데모 테넌트(㈜바틀 (데모)) API 키 — 프론트엔드 접속 시 입력하세요:
+[server]    gn_live_6e7d26b104663d1bc54c016dcf3668a7c384fc7d9ec49125
+[server] 🛠  관리자 토큰 — 관리자 콘솔 접속 시 입력하세요:
+[server]    gn_admin_6ac2685abe8379773f1280e32d04bb9039d887535275a45f
+[server] 🛡  GuardNote API  →  http://localhost:8787
+[server] 💳 정기결제 스케줄러 시작 (모드: mock, 주기: 360분)
+[server] npm run server exited with code SIGKILL
+[web] npm run client exited with code SIGKILL

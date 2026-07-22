@@ -1,0 +1,15 @@
+node_modules
+dist
+server/guardnote.db
+server/guardnote.db-*
+server/.demo-key
+server/.admin-token
+server/.anchor-secret
+server/.billing-secret
+server/.contract-secret
+*.log
+*.pptx
+*.command
+.claude
+.railwayignore
+server/backups
