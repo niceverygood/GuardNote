@@ -242,6 +242,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .auto-head { background: #f3f1ed; color: var(--muted); font-size: 8px; font-weight: 700; }
 .auto-row { border-top: 1px solid var(--line); font-size: 9px; }
 .auto-row p { margin: 0; color: #6f6a63; line-height: 1.5; }
+.auto-row p small { display: flex; align-items: center; gap: 4px; margin-top: 4px; color: var(--orange-dark); font-size: 7.5px; }
 .text-bad { color: var(--red); }
 
 .vendor-summary { display: flex; justify-content: space-between; align-items: flex-end; gap: 30px; padding: 14px 4px 28px; }
@@ -303,6 +304,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .result-block b { font-size: 9px; }
 .result-block p { margin: 5px 0 0; color: #5e5a54; font-size: 9px; line-height: 1.75; }
 .result-block p strong { color: var(--red); }
+.result-block ul { margin: 7px 0 0; padding-left: 17px; color: #5e5a54; font-size: 9px; line-height: 1.7; }
 .result-block.suggestion { border-color: #bcefd2; background: #f3fcf7; }
 .field { display: grid; gap: 6px; margin-top: 13px; }
 .field span { font-size: 9px; font-weight: 700; }
@@ -378,6 +380,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .finding-list article > span { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: #f3f1ed; color: var(--muted); font: 700 9px "DM Sans"; }
 .finding-list h4 { margin: 1px 0 5px; font-size: 10px; }
 .finding-list p { margin: 0; color: #66615a; font-size: 9px; line-height: 1.65; }
+.review-summary-copy { margin: 13px 0; padding: 12px 14px; border-radius: 8px; background: var(--green-soft); color: #246b46; font-size: 9px; line-height: 1.7; }
+.finding-list blockquote { margin: 7px 0 0; padding: 7px 9px; border-left: 2px solid var(--orange); background: #f9fffb; color: #5d7769; font-size: 8px; line-height: 1.55; }
 .finding-list small { display: flex; align-items: center; gap: 4px; margin-top: 6px; color: var(--orange-dark); font-size: 8px; }
 .doc-result-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 19px; }
 .generator-layout { display: grid; grid-template-columns: .7fr 1.3fr; gap: 14px; align-items: stretch; }
@@ -396,6 +400,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .validation-strip { display: flex; gap: 8px; margin: 16px 0 10px; }
 .validation-strip span { display: flex; align-items: center; gap: 4px; padding: 7px 8px; border-radius: 6px; color: var(--green); background: var(--green-soft); font-size: 8px; }
 .validation-strip span:last-child { color: var(--yellow); background: var(--yellow-soft); }
+.generation-warnings { margin: 0 0 10px; padding: 10px 12px 10px 28px; border: 1px solid #bcefd2; border-radius: 8px; background: #f3fcf7; color: #246b46; font-size: 8px; line-height: 1.6; }
 .document-editor textarea { width: 100%; min-height: 410px; padding: 18px; border: 1px solid var(--line); border-radius: 8px; resize: vertical; outline: 0; font-size: 10px; line-height: 1.8; }
 .clause-trace { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
 .clause-trace b { margin-right: 3px; font-size: 9px; }

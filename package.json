@@ -1,7 +1,7 @@
 {
   "name": "guardnote",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "concurrently -n server,web -c yellow,cyan \"npm:server\" \"npm:client\"",
@@ -13,6 +13,7 @@
     "anchor": "node server/anchor-cli.js",
     "backup": "node server/backup-cli.js",
     "collector": "node server/collector-example.js",
+    "test:ai-live": "node scripts/test-ai-live.mjs",
     "build": "vite build && node scripts/site-worker.mjs",
     "preview": "vite preview"
   },
@@ -20,7 +21,9 @@
     "@anthropic-ai/sdk": "^0.110.0",
     "better-sqlite3": "^11.7.0",
     "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
     "express": "^4.21.2",
+    "jszip": "^3.10.1",
     "lucide-react": "^0.460.0",
     "pdfkit": "^0.15.1",
     "react": "^18.3.1",
