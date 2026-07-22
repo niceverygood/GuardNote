@@ -13,7 +13,7 @@
     "anchor": "node server/anchor-cli.js",
     "backup": "node server/backup-cli.js",
     "collector": "node server/collector-example.js",
-    "build": "vite build",
+    "build": "vite build && node scripts/site-worker.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
