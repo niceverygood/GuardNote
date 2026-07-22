@@ -1,0 +1,15 @@
+node_modules/
+dist/
+tmp/
+.env
+.env.*
+!.env.example
+server/*.db
+server/*.db-*
+server/.demo-key
+server/backups/
+*.pptx
+*.pdf
+*.command
+*.log
+.DS_Store
